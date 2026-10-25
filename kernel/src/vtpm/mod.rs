@@ -118,3 +118,13 @@ pub fn vtpm_get_manifest() -> Result<Vec<u8>, SvsmReqError> {
     let mut vtpm = VTPM.lock();
     vtpm.get_ekpub()
 }
+
+/// Provision and endorse the optional managed AK while excluding guest commands.
+#[cfg(feature = "vtpm-ak")]
+pub fn vtpm_get_ak_manifest() -> Result<Vec<u8>, SvsmReqError> {
+    let vtpm = VTPM.lock();
+    tcgtpm::ak::manifest(&*vtpm).map_err(|err| {
+        log::error!("VTPM: managed AK provisioning failed: {err:?}");
+        err.into()
+    })
+}

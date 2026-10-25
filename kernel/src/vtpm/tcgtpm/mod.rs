@@ -14,6 +14,8 @@ mod wrapper;
 mod persistence;
 use persistence::{ManufacturedMarker, Marker as _};
 
+#[cfg(feature = "vtpm-ak")]
+pub mod ak;
 pub mod ek_templates;
 mod tss;
 
