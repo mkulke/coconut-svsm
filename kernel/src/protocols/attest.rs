@@ -21,6 +21,8 @@ use crate::mm::guestmem::{copy_slice_to_guest, read_bytes_from_guest, read_from_
 use crate::protocols::uefivars::uefi_mm_get_manifest;
 use crate::protocols::{RequestParams, errors::SvsmReqError};
 use crate::utils::MemoryRegion;
+#[cfg(feature = "vtpm-ak")]
+use crate::vtpm::vtpm_get_ak_manifest;
 #[cfg(feature = "vtpm")]
 use crate::vtpm::vtpm_get_manifest;
 
@@ -40,6 +42,8 @@ const SVSM_ATTEST_SINGLE_SERVICE: u32 = 1;
 
 #[cfg(feature = "vtpm")]
 const SVSM_ATTEST_VTPM_GUID: Uuid = uuid!("c476f1eb-0123-45a5-9641-b4e7dde5bfe3");
+#[cfg(feature = "vtpm-ak")]
+const SVSM_ATTEST_VTPM_AK_GUID: Uuid = uuid!("a6b5b9b0-7491-4f67-98ac-fc12f97b8e43");
 #[cfg(feature = "uefivars")]
 const SVSM_ATTEST_UEFI_MM_GUID: Uuid = uuid!("a4453a59-9e1b-4787-a033-1986d6adbe55");
 
@@ -538,6 +542,9 @@ fn attest_multiple_services(params: &mut RequestParams) -> Result<(), SvsmReqErr
     #[cfg(feature = "vtpm")]
     services.push(SVSM_ATTEST_VTPM_GUID, vtpm_get_manifest()?);
 
+    #[cfg(feature = "vtpm-ak")]
+    services.push(SVSM_ATTEST_VTPM_AK_GUID, vtpm_get_ak_manifest()?);
+
     #[cfg(feature = "uefivars")]
     services.push(SVSM_ATTEST_UEFI_MM_GUID, uefi_mm_get_manifest()?);
 
@@ -565,6 +572,10 @@ fn attest_single_service_handler(params: &mut RequestParams) -> Result<(), SvsmR
     match attest_op.get_guid() {
         #[cfg(feature = "vtpm")]
         SVSM_ATTEST_VTPM_GUID => attest_single_vtpm(params, &attest_op),
+        #[cfg(feature = "vtpm-ak")]
+        SVSM_ATTEST_VTPM_AK_GUID => {
+            attest_single_service(vtpm_get_ak_manifest()?.as_slice(), params, &attest_op)
+        }
         #[cfg(feature = "uefivars")]
         SVSM_ATTEST_UEFI_MM_GUID => {
             attest_single_service(uefi_mm_get_manifest()?.as_slice(), params, &attest_op)
@@ -596,6 +607,28 @@ mod tests {
             err,
             SvsmReqError::RequestError(SvsmResultCode::INVALID_PARAMETER)
         )
+    }
+
+    #[cfg(feature = "vtpm-ak")]
+    #[test]
+    fn managed_ak_is_separate_from_legacy_ek_manifest() {
+        assert_ne!(SVSM_ATTEST_VTPM_GUID, SVSM_ATTEST_VTPM_AK_GUID);
+        let mut services = GuidTable::new();
+        services.push(SVSM_ATTEST_VTPM_GUID, b"legacy-ek".to_vec());
+        let mut ak = crate::vtpm::tcgtpm::ak::PERSISTENT_HANDLE
+            .to_le_bytes()
+            .to_vec();
+        ak.extend_from_slice(b"managed-ak");
+        services.push(SVSM_ATTEST_VTPM_AK_GUID, ak.clone());
+        let data = services.to_vec().unwrap();
+        let header_size = 3 * GUID_HEADER_ENTRY_SIZE;
+        assert_eq!(&data[20..24], &2u32.to_le_bytes());
+        assert_eq!(&data[24..40], &SVSM_ATTEST_VTPM_GUID.to_bytes_le());
+        assert_eq!(&data[48..64], &SVSM_ATTEST_VTPM_AK_GUID.to_bytes_le());
+        assert_eq!(&data[40..44], &(header_size as u32).to_le_bytes());
+        assert_eq!(&data[64..68], &((header_size + 9) as u32).to_le_bytes());
+        assert_eq!(&data[header_size..header_size + 9], b"legacy-ek");
+        assert_eq!(&data[header_size + 9..], ak);
     }
 
     mod attest_services {

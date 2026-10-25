@@ -30,7 +30,7 @@ fn tpm_cmd_rc(cmd: &[u8]) -> u32 {
     u32::from_be_bytes(cmd[6..10].try_into().unwrap())
 }
 
-fn extend_empty_auth(buf: &mut Vec<u8>) {
+pub(super) fn extend_empty_auth(buf: &mut Vec<u8>) {
     // TPM_RS_PW(4) + nonce(2) + attributes(1) + pw(2)
     buf.extend_from_slice(&[
         0x00, 0x00, 0x00, 0x09, // Size
@@ -42,7 +42,7 @@ fn extend_empty_auth(buf: &mut Vec<u8>) {
     ]);
 }
 
-fn create_mtauth_ek_cmd(tpmt_public: &[u8]) -> Vec<u8> {
+pub(super) fn create_endorsement_primary_cmd(tpmt_public: &[u8]) -> Vec<u8> {
     let mut cmd = Vec::<u8>::with_capacity(TPM_BUFFER_MAX_SIZE);
 
     // TPM Command header
@@ -102,6 +102,9 @@ pub fn checked_send<T: TcgTpmSimulatorInterface>(
     cmd: &mut [u8],
     set_len: bool,
 ) -> Result<Vec<u8>, SvsmVTpmError> {
+    if cmd.len() < 10 {
+        return Err(SvsmReqError::invalid_parameter().into());
+    }
     let command_size;
     if set_len {
         command_size = cmd.len();
@@ -109,9 +112,17 @@ pub fn checked_send<T: TcgTpmSimulatorInterface>(
     } else {
         command_size = u32::from_be_bytes(cmd[2..6].try_into().unwrap()) as usize;
     }
+    if !(10..=cmd.len()).contains(&command_size) {
+        return Err(SvsmReqError::invalid_parameter().into());
+    }
     let response = vtpm
         .send_tpm_command(&cmd[..command_size], 0)
         .map_err(|_| SvsmVTpmError::ReqError(SvsmReqError::invalid_request()))?;
+    if response.len() < 10
+        || u32::from_be_bytes(response[2..6].try_into().unwrap()) as usize != response.len()
+    {
+        return Err(SvsmReqError::invalid_request().into());
+    }
     let rc = tpm_cmd_rc(&response);
     if rc != TPM_RC_SUCCESS {
         return Err(SvsmVTpmError::CommandError(rc));
@@ -135,7 +146,7 @@ pub fn create_ek<T: TcgTpmSimulatorInterface>(
     vtpm: &T,
     tpmt_public: &[u8],
 ) -> Result<Vec<u8>, SvsmVTpmError> {
-    let mut cmd = create_mtauth_ek_cmd(tpmt_public);
+    let mut cmd = create_endorsement_primary_cmd(tpmt_public);
 
     let mut response = checked_send(vtpm, &mut cmd, /*set_len=*/ false)?;
 

@@ -41,4 +41,5 @@ nav:
       - 'developer/design/OBJECT.md'
   - SVSM Protocols:
     - UEFI MM Protocol: 'protocols/uefivars.md'
+    - Managed vTPM AK: 'protocols/vtpm-ak.md'
   - 'COCONUT-SVSM Rustdoc': 'rustdoc/svsm'
